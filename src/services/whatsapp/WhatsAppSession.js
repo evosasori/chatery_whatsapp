@@ -530,13 +530,19 @@ class WhatsAppSession {
 
     // ==================== HELPERS ====================
 
-    formatPhoneNumber(phone) {
+    formatPhoneNumber(phone, isGroup = false) {
+        if (!phone || phone.trim() === '') {
+            throw new Error('Phone number cannot be empty');
+        }
         let formatted = phone.replace(/\D/g, '');
         if (formatted.startsWith('0')) {
             formatted = '62' + formatted.slice(1);
         }
+        if (!formatted) {
+            throw new Error('Invalid phone number: no digits found');
+        }
         if (!formatted.includes('@')) {
-            formatted = formatted + '@c.us';
+            formatted = formatted + (isGroup ? '@g.us' : '@c.us');
         }
         return formatted;
     }
@@ -552,14 +558,43 @@ class WhatsAppSession {
         return isGroup ? `${formatted}@g.us` : `${formatted}@c.us`;
     }
 
-    formatChatId(chatId) {
-        if (chatId.includes('@')) return chatId;
-        
+    formatChatId(chatId, isGroup = false) {
+        if (!chatId || chatId.trim() === '') {
+            throw new Error('Chat ID cannot be empty');
+        }
+        if (chatId.includes('@')) {
+            return chatId;
+        }
+
         let formatted = chatId.replace(/\D/g, '');
         if (formatted.startsWith('0')) {
             formatted = '62' + formatted.slice(1);
         }
-        return `${formatted}@c.us`;
+        if (!formatted) {
+            throw new Error('Invalid Chat ID: no digits found');
+        }
+        return isGroup ? `${formatted}@g.us` : `${formatted}@c.us`;
+    }
+
+    normalizeChatId(chatId) {
+        if (!chatId || chatId.trim() === '') {
+            return null;
+        }
+        if (chatId.includes('@g.us')) {
+            return this.formatChatId(chatId, true);
+        }
+        if (chatId.includes('@c.us')) {
+            return this.formatChatId(chatId, false);
+        }
+        const jid = this.formatJid(chatId, false);
+        if (this.isGroupJid(jid)) {
+            return this.formatChatId(chatId, true);
+        }
+        return jid;
+    }
+
+    isGroupJid(jid) {
+        return jid?.endsWith('@g.us');
     }
 
     isGroupId(chatId) {
@@ -2279,7 +2314,8 @@ class WhatsAppSession {
                 return { success: false, message: 'Chat ID and label ID are required' };
             }
 
-            const jid = this.formatChatId(chatId);
+            const isGroup = this.isGroupId(chatId);
+            const jid = this.formatChatId(chatId, isGroup);
             await this.socket.chatModify({ addChatLabel: { type: 'label_jid', chatId: jid, labelId } }, jid);
 
             return {
@@ -2311,7 +2347,8 @@ class WhatsAppSession {
                 return { success: false, message: 'Chat ID and label ID are required' };
             }
 
-            const jid = this.formatChatId(chatId);
+            const isGroup = this.isGroupId(chatId);
+            const jid = this.formatChatId(chatId, isGroup);
             await this.socket.chatModify({ removeChatLabel: { type: 'label_jid', chatId: jid, labelId } }, jid);
 
             return {
@@ -2342,11 +2379,13 @@ class WhatsAppSession {
                 return { success: false, message: 'Chat ID is required' };
             }
 
-            const jid = this.formatChatId(chatId);
-            const chatLabels = this.socket.store?.getChatLabels?.(jid) || [];
+            const isGroup = this.isGroupId(chatId);
+            const jid = this.formatChatId(chatId, isGroup);
+            const chatLabelsRaw = this.socket.store?.getChatLabels?.(jid);
+            const chatLabels = Array.isArray(chatLabelsRaw) ? chatLabelsRaw : [];
 
             const labels = this.socket.store?.labels;
-            const allLabels = labels?.get?.() || [];
+            const allLabels = Array.isArray(labels?.get?.()) ? labels.get() : [];
 
             const chatLabelIds = chatLabels.map(cl => cl.labelId);
             const detailedLabels = allLabels.filter(l => chatLabelIds.includes(l.id)).map(l => ({

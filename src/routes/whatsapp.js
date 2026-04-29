@@ -1550,12 +1550,18 @@ router.post('/labels/delete', checkSession, async (req, res) => {
 router.post('/labels/chat/add', checkSession, async (req, res) => {
     try {
         const { chatId, labelId } = req.body;
-        
+
         if (!chatId || !labelId) {
             return res.status(400).json({
                 success: false,
                 message: 'Chat ID and label ID are required'
             });
+        }
+
+        if (chatId.includes('@g.us') || chatId.match(/^\d+-\d+@g\.us$/)) {
+            chatId = chatId.replace('@g.us', '') + '@g.us';
+        } else if (chatId.includes('@c.us')) {
+            chatId = chatId.replace('@c.us', '') + '@c.us';
         }
 
         const result = await req.session.addChatLabel(chatId, labelId);
@@ -1572,12 +1578,18 @@ router.post('/labels/chat/add', checkSession, async (req, res) => {
 router.post('/labels/chat/remove', checkSession, async (req, res) => {
     try {
         const { chatId, labelId } = req.body;
-        
+
         if (!chatId || !labelId) {
             return res.status(400).json({
                 success: false,
                 message: 'Chat ID and label ID are required'
             });
+        }
+
+        if (chatId.includes('@g.us') || chatId.match(/^\d+-\d+@g\.us$/)) {
+            chatId = chatId.replace('@g.us', '') + '@g.us';
+        } else if (chatId.includes('@c.us')) {
+            chatId = chatId.replace('@c.us', '') + '@c.us';
         }
 
         const result = await req.session.removeChatLabel(chatId, labelId);
@@ -1594,12 +1606,18 @@ router.post('/labels/chat/remove', checkSession, async (req, res) => {
 router.post('/labels/chat', checkSession, async (req, res) => {
     try {
         const { chatId } = req.body;
-        
+
         if (!chatId) {
             return res.status(400).json({
                 success: false,
                 message: 'Chat ID is required'
             });
+        }
+
+        if (chatId.includes('@g.us') || chatId.match(/^\d+-\d+@g\.us$/)) {
+            chatId = chatId.replace('@g.us', '') + '@g.us';
+        } else if (chatId.includes('@c.us')) {
+            chatId = chatId.replace('@c.us', '') + '@c.us';
         }
 
         const result = await req.session.getChatLabels(chatId);
