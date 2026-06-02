@@ -575,6 +575,43 @@ class WhatsAppSession {
         return chatId.includes('@g.us');
     }
 
+    async resolveLidFromServer(lid) {
+        if (!lid || !lid.endsWith('@lid') || !this.socket) return null;
+        
+        try {
+            const { USyncQuery, USyncUser } = require('@whiskeysockets/baileys');
+            const query = new USyncQuery()
+                .withContext('message')
+                .withDeviceProtocol()
+                .withLIDProtocol();
+                
+            query.withUser(new USyncUser().withId(lid));
+            
+            const result = await this.socket.executeUSyncQuery(query);
+            if (result && result.list) {
+                for (const item of result.list) {
+                    if (item.lid && item.id) {
+                        const lidJid = item.lid.toLowerCase();
+                        const pnJid = item.id.toLowerCase();
+                        if (this.store) {
+                            this.store.registerIdentity(lidJid, pnJid);
+                        }
+                        if (lidJid === lid.toLowerCase()) {
+                            return {
+                                lid: lidJid,
+                                jid: pnJid,
+                                pn: pnJid.split('@')[0]
+                            };
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.error(`[${this.sessionId}] Error resolving LID from server:`, error.message);
+        }
+        return null;
+    }
+
     // ==================== SEND MESSAGES ====================
 
     /**
@@ -1259,18 +1296,52 @@ class WhatsAppSession {
             const total = chats.length;
             const paginatedChats = chats.slice(offset, offset + limit);
 
+            // Resolve unmapped LIDs in parallel from the server
+            const resolvePromises = paginatedChats.map(async (chat) => {
+                if (chat.isGroup) return;
+                if (chat.id && chat.id.endsWith('@lid')) {
+                    const existing = this.store.resolveIdentity(chat.id);
+                    if (!existing) {
+                        await this.resolveLidFromServer(chat.id);
+                    }
+                }
+            });
+            await Promise.all(resolvePromises);
+
             // Transform to expected format
-            const formattedChats = paginatedChats.map(chat => ({
-                id: chat.id,
-                name: chat.name,
-                phone: chat.isGroup ? null : chat.id.split('@')[0],
-                isGroup: chat.isGroup,
-                profilePicture: chat.profilePicture,
-                participantsCount: null,
-                lastMessage: chat.lastMessage?.preview || null,
-                lastMessageTimestamp: chat.lastMessage?.timestamp || chat.conversationTimestamp || 0,
-                unreadCount: chat.unreadCount || 0
-            }));
+            const formattedChats = paginatedChats.map(chat => {
+                let resolvedId = chat.id;
+                let resolvedPhone = chat.isGroup ? null : chat.id.split('@')[0];
+                let resolvedName = chat.name;
+
+                if (!chat.isGroup && this.store) {
+                    const resolved = this.store.resolveIdentity(chat.id);
+                    if (resolved) {
+                        resolvedId = resolved.jid || resolvedId;
+                        resolvedPhone = resolved.pn || resolvedPhone;
+                    }
+
+                    // Fix name if it's still LID-based (ends with @lid, or matches the LID number)
+                    const lidNumber = chat.id.endsWith('@lid') ? chat.id.split('@')[0] : null;
+                    if (resolvedName && (resolvedName.endsWith('@lid') || resolvedName === lidNumber)) {
+                        // Try to get a proper name from resolved contact
+                        const contact = this.store.getContact(resolvedId);
+                        resolvedName = contact?.name || contact?.notify || resolvedPhone || resolvedId.split('@')[0];
+                    }
+                }
+
+                return {
+                    id: resolvedId,
+                    name: resolvedName,
+                    phone: resolvedPhone,
+                    isGroup: chat.isGroup,
+                    profilePicture: chat.profilePicture,
+                    participantsCount: null,
+                    lastMessage: chat.lastMessage?.preview || null,
+                    lastMessageTimestamp: chat.lastMessage?.timestamp || chat.conversationTimestamp || 0,
+                    unreadCount: chat.unreadCount || 0
+                };
+            });
 
             return {
                 success: true,
@@ -1355,6 +1426,12 @@ class WhatsAppSession {
             }
 
             const jid = this.formatChatId(chatId);
+            
+            // Resolve unmapped LID from server
+            if (jid && jid.endsWith('@lid') && this.store && !this.store.resolveIdentity(jid)) {
+                await this.resolveLidFromServer(jid);
+            }
+
             const isGroup = this.isGroupId(jid);
             
             let messages = [];
@@ -1422,6 +1499,12 @@ class WhatsAppSession {
             }
 
             const jid = this.formatChatId(chatId);
+            
+            // Resolve unmapped LID from server
+            if (jid && jid.endsWith('@lid') && this.store && !this.store.resolveIdentity(jid)) {
+                await this.resolveLidFromServer(jid);
+            }
+
             const isGroup = this.isGroupId(jid);
             
             let profilePicture = null;
@@ -1443,12 +1526,23 @@ class WhatsAppSession {
                             ownerPhone: metadata.owner?.split('@')[0],
                             creation: metadata.creation,
                             description: metadata.desc || null,
-                            participants: metadata.participants.map(p => ({
-                                id: p.id,
-                                phone: p.id.split('@')[0],
-                                isAdmin: p.admin === 'admin' || p.admin === 'superadmin',
-                                isSuperAdmin: p.admin === 'superadmin'
-                            })),
+                            participants: metadata.participants.map(p => {
+                                let resolvedId = p.id;
+                                let resolvedPhone = p.id.split('@')[0];
+                                if (this.store) {
+                                    const resolved = this.store.resolveIdentity(p.id);
+                                    if (resolved) {
+                                        resolvedId = resolved.jid || resolvedId;
+                                        resolvedPhone = resolved.pn || resolvedPhone;
+                                    }
+                                }
+                                return {
+                                    id: resolvedId,
+                                    phone: resolvedPhone,
+                                    isAdmin: p.admin === 'admin' || p.admin === 'superadmin',
+                                    isSuperAdmin: p.admin === 'superadmin'
+                                };
+                            }),
                             participantsCount: metadata.participants.length
                         }
                     };
@@ -1456,7 +1550,15 @@ class WhatsAppSession {
                     return { success: false, message: 'Failed to get group info' };
                 }
             } else {
-                const phone = jid.split('@')[0];
+                let resolvedJid = jid;
+                let phone = jid.split('@')[0];
+                if (this.store) {
+                    const resolved = this.store.resolveIdentity(jid);
+                    if (resolved) {
+                        resolvedJid = resolved.jid || resolvedJid;
+                        phone = resolved.pn || phone;
+                    }
+                }
                 
                 let status = null;
                 try {
@@ -1473,7 +1575,7 @@ class WhatsAppSession {
                 return {
                     success: true,
                     data: {
-                        id: jid,
+                        id: resolvedJid,
                         phone: phone,
                         isGroup: false,
                         profilePicture: profilePicture,
@@ -1618,6 +1720,17 @@ class WhatsAppSession {
             console.error(`[${this.sessionId}] Auto-save media error:`, error.message);
             return null;
         }
+    }
+
+    _getMimetype(contentType) {
+        const map = {
+            'imageMessage': 'image/jpeg',
+            'videoMessage': 'video/mp4',
+            'audioMessage': 'audio/ogg; codecs=opus',
+            'documentMessage': 'application/octet-stream',
+            'stickerMessage': 'image/webp'
+        };
+        return map[contentType] || 'application/octet-stream';
     }
 
     _getExtFromMimetype(mimetype) {
