@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, downloadMediaMessage, getContentType } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, downloadMediaMessage, getContentType, jidNormalizedUser } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const path = require('path');
 const fs = require('fs');
@@ -260,6 +260,15 @@ class WhatsAppSession {
                     this.phoneNumber = this.socket.user.id.split(':')[0];
                     this.name = this.socket.user.name || 'Unknown';
                     console.log(`👤 [${this.sessionId}] Connected as: ${this.name} (${this.phoneNumber})`);
+                    
+                    // Register me JID, LID, and Phone Number
+                    if (this.store) {
+                        const normalizedMe = jidNormalizedUser(this.socket.user.id);
+                        const meLid = this.socket.user.lid;
+                        if (meLid) {
+                            this.store.registerIdentity(meLid, normalizedMe, this.phoneNumber);
+                        }
+                    }
                 }
                 
                 // Emit connection status to WebSocket
@@ -309,14 +318,14 @@ class WhatsAppSession {
                     await this._autoSaveMedia(message);
                     
                     // Emit message to WebSocket
-                    const formattedMessage = MessageFormatter.formatMessage(message);
+                    const formattedMessage = MessageFormatter.formatMessage(message, this.store);
                     wsManager.emitMessage(this.sessionId, formattedMessage);
                     
                     // Send webhook
                     this._sendWebhook('message', formattedMessage);
                 } else if (message.key.fromMe && m.type === 'notify') {
                     // Message sent confirmation
-                    const formattedMessage = MessageFormatter.formatMessage(message);
+                    const formattedMessage = MessageFormatter.formatMessage(message, this.store);
                     wsManager.emitMessageSent(this.sessionId, formattedMessage);
                     
                     // Send webhook
@@ -1384,7 +1393,7 @@ class WhatsAppSession {
 
             const formattedMessages = messages
                 .filter(msg => msg && msg.key) // Filter invalid messages
-                .map(msg => MessageFormatter.formatMessage(msg))
+                .map(msg => MessageFormatter.formatMessage(msg, this.store))
                 .filter(msg => msg !== null);
 
             return {

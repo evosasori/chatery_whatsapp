@@ -12,6 +12,9 @@ class BaileysStore {
     this.messages = new Map();
     this.groupMetadata = new Map();
     
+    // LID identity mapping registry (key: JID/LID/PN -> { lid, pn, jid })
+    this.lidMap = new Map();
+    
     // Optimized caches for fast queries
     this.chatsOverview = new Map(); // Pre-computed chat overview
     this.profilePictures = new Map(); // Cached profile pictures
@@ -67,13 +70,21 @@ class BaileysStore {
     ev.on('contacts.set', ({ contacts }) => {
       for (const contact of contacts) {
         this.contacts.set(contact.id, contact);
+        if (contact.id && contact.lid) {
+          this.registerIdentity(contact.lid, contact.id);
+        }
       }
       this._invalidateContactsCache();
     });
 
     ev.on('contacts.upsert', (contacts) => {
       for (const contact of contacts) {
-        this.contacts.set(contact.id, { ...this.contacts.get(contact.id), ...contact });
+        const existing = this.contacts.get(contact.id) || {};
+        const merged = { ...existing, ...contact };
+        this.contacts.set(contact.id, merged);
+        if (merged.id && merged.lid) {
+          this.registerIdentity(merged.lid, merged.id);
+        }
       }
       this._invalidateContactsCache();
     });
@@ -82,7 +93,11 @@ class BaileysStore {
       for (const update of updates) {
         const existing = this.contacts.get(update.id);
         if (existing) {
-          this.contacts.set(update.id, { ...existing, ...update });
+          const merged = { ...existing, ...update };
+          this.contacts.set(update.id, merged);
+          if (merged.id && merged.lid) {
+            this.registerIdentity(merged.lid, merged.id);
+          }
         }
       }
       this._invalidateContactsCache();
@@ -482,7 +497,8 @@ class BaileysStore {
           Array.from(msgs.entries()).slice(-100) // Keep only last 100 messages per chat
         ]),
         groupMetadata: Array.from(this.groupMetadata.entries()),
-        profilePictures: Array.from(this.profilePictures.entries())
+        profilePictures: Array.from(this.profilePictures.entries()),
+        lidMap: Array.from(this.lidMap.entries())
       };
       
       // Use safe serialization to avoid .enc or corrupted files
@@ -551,6 +567,16 @@ class BaileysStore {
       }
       if (data.profilePictures) {
         this.profilePictures = new Map(data.profilePictures);
+      }
+      if (data.lidMap) {
+        this.lidMap = new Map(data.lidMap);
+      }
+      
+      // Reconstruct lidMap from contacts just in case they exist but weren't in lidMap
+      for (const [id, contact] of this.contacts.entries()) {
+        if (contact.id && contact.lid) {
+          this.registerIdentity(contact.lid, contact.id);
+        }
       }
       
       // Rebuild overview cache after restore
@@ -680,6 +706,72 @@ class BaileysStore {
         this.mediaFiles.delete(messageId);
       }
     }
+  }
+
+  /**
+   * Register a mapping between LID, JID (PN JID), and PN (Phone Number)
+   */
+  registerIdentity(lid, jid, pn = null) {
+    if (!lid || !jid) return;
+    
+    const normalizedLid = lid.toLowerCase();
+    const normalizedJid = jid.toLowerCase();
+    const cleanPn = pn || normalizedJid.split('@')[0];
+    
+    const mapping = {
+      lid: normalizedLid,
+      pn: cleanPn,
+      jid: normalizedJid
+    };
+    
+    // Register by LID, JID, and PN for fast O(1) lookups
+    this.lidMap.set(normalizedLid, mapping);
+    this.lidMap.set(normalizedJid, mapping);
+    this.lidMap.set(cleanPn, mapping);
+  }
+
+  /**
+   * Resolve any identifier (LID, JID, or Phone Number) to its complete identity mapping
+   */
+  resolveIdentity(identifier) {
+    if (!identifier) return null;
+    const cleanId = identifier.toString().toLowerCase();
+    
+    // 1. Check primary lidMap cache
+    if (this.lidMap.has(cleanId)) {
+      return this.lidMap.get(cleanId);
+    }
+    
+    // 2. Fallback: Search in contacts list
+    for (const [id, contact] of this.contacts.entries()) {
+      if (contact.id && contact.lid) {
+        const lidLower = contact.lid.toLowerCase();
+        const idLower = contact.id.toLowerCase();
+        if (lidLower === cleanId || idLower === cleanId || idLower.split('@')[0] === cleanId) {
+          this.registerIdentity(contact.lid, contact.id);
+          return this.lidMap.get(cleanId);
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Resolve any JID (LID or PN JID) to a phone number.
+   * If not found in the mapping registry, it falls back to parsing the JID if it is a PN JID,
+   * or returns the input itself.
+   */
+  resolvePhoneNumber(jid) {
+    if (!jid) return null;
+    const resolved = this.resolveIdentity(jid);
+    if (resolved && resolved.pn) {
+      return resolved.pn;
+    }
+    // Fallback: if it's a PN JID (ends with @s.whatsapp.net), split to get the phone number
+    if (jid.endsWith('@s.whatsapp.net')) {
+      return jid.split('@')[0];
+    }
+    return jid; // could be group ID or LID
   }
 }
 
