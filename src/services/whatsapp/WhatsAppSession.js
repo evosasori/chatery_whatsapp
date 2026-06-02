@@ -1251,6 +1251,183 @@ class WhatsAppSession {
         }
     }
 
+    // ==================== LABELS ====================
+
+    /**
+     * Get all labels
+     */
+    async getLabels() {
+        try {
+            if (!this.socket || this.connectionStatus !== 'connected') {
+                return { success: false, message: 'Session not connected' };
+            }
+            if (!this.store) {
+                return { success: false, message: 'Store not initialized' };
+            }
+
+            const labels = this.store.getLabels();
+            return {
+                success: true,
+                data: { labels, total: labels.length }
+            };
+        } catch (error) {
+            return { success: false, message: error.message };
+        }
+    }
+
+    /**
+     * Get label by ID
+     */
+    async getLabelById(labelId) {
+        try {
+            if (!this.store) {
+                return { success: false, message: 'Store not initialized' };
+            }
+
+            const label = this.store.getLabelById(labelId);
+            if (!label) {
+                return { success: false, message: 'Label not found' };
+            }
+            return { success: true, data: label };
+        } catch (error) {
+            return { success: false, message: error.message };
+        }
+    }
+
+    /**
+     * Add label to chat
+     */
+    async addChatLabel(chatId, labelId) {
+        try {
+            if (!this.socket || this.connectionStatus !== 'connected') {
+                return { success: false, message: 'Session not connected' };
+            }
+
+            const jid = this.formatChatId(chatId);
+            await this.socket.addChatLabel(jid, labelId);
+
+            // Update store immediately
+            if (this.store) {
+                this.store.addLabelAssociation(jid, labelId);
+            }
+
+            return { success: true, message: 'Label added to chat', data: { chatId: jid, labelId } };
+        } catch (error) {
+            return { success: false, message: error.message };
+        }
+    }
+
+    /**
+     * Remove label from chat
+     */
+    async removeChatLabel(chatId, labelId) {
+        try {
+            if (!this.socket || this.connectionStatus !== 'connected') {
+                return { success: false, message: 'Session not connected' };
+            }
+
+            const jid = this.formatChatId(chatId);
+            await this.socket.removeChatLabel(jid, labelId);
+
+            // Update store immediately
+            if (this.store) {
+                this.store.removeLabelAssociation(jid, labelId);
+            }
+
+            return { success: true, message: 'Label removed from chat', data: { chatId: jid, labelId } };
+        } catch (error) {
+            return { success: false, message: error.message };
+        }
+    }
+
+    /**
+     * Add label to a specific message
+     */
+    async addMessageLabel(chatId, messageId, labelId) {
+        try {
+            if (!this.socket || this.connectionStatus !== 'connected') {
+                return { success: false, message: 'Session not connected' };
+            }
+
+            const jid = this.formatChatId(chatId);
+
+            if (typeof this.socket.addMessageLabel !== 'function') {
+                return { success: false, message: 'Message labeling not supported in this Baileys version' };
+            }
+
+            await this.socket.addMessageLabel(jid, messageId, labelId);
+            return { success: true, message: 'Label added to message', data: { chatId: jid, messageId, labelId } };
+        } catch (error) {
+            return { success: false, message: error.message };
+        }
+    }
+
+    /**
+     * Remove label from a specific message
+     */
+    async removeMessageLabel(chatId, messageId, labelId) {
+        try {
+            if (!this.socket || this.connectionStatus !== 'connected') {
+                return { success: false, message: 'Session not connected' };
+            }
+
+            const jid = this.formatChatId(chatId);
+
+            if (typeof this.socket.removeMessageLabel !== 'function') {
+                return { success: false, message: 'Message labeling not supported in this Baileys version' };
+            }
+
+            await this.socket.removeMessageLabel(jid, messageId, labelId);
+            return { success: true, message: 'Label removed from message', data: { chatId: jid, messageId, labelId } };
+        } catch (error) {
+            return { success: false, message: error.message };
+        }
+    }
+
+    /**
+     * Get all chats with a specific label
+     */
+    async getChatsByLabel(labelId) {
+        try {
+            if (!this.store) {
+                return { success: false, message: 'Store not initialized' };
+            }
+
+            const label = this.store.getLabelById(labelId);
+            if (!label) {
+                return { success: false, message: 'Label not found' };
+            }
+
+            const chats = this.store.getChatsByLabel(labelId);
+            return {
+                success: true,
+                data: { label, chats, total: chats.length }
+            };
+        } catch (error) {
+            return { success: false, message: error.message };
+        }
+    }
+
+    /**
+     * Get all labels for a specific chat
+     */
+    async getLabelsByChat(chatId) {
+        try {
+            if (!this.store) {
+                return { success: false, message: 'Store not initialized' };
+            }
+
+            const jid = this.formatChatId(chatId);
+            const labels = this.store.getLabelsByChat(jid);
+            return {
+                success: true,
+                data: { chatId: jid, labels, total: labels.length }
+            };
+        } catch (error) {
+            return { success: false, message: error.message };
+        }
+    }
+
     // ==================== CHAT HISTORY ====================
 
     /**

@@ -24,6 +24,10 @@ class BaileysStore {
     this._sortedOverviewCache = null; // Cached sorted overview array
     this._sortedContactsCache = null; // Cached sorted contacts array
     
+    // Label storage
+    this.labels = new Map(); // labelId -> { id, name, color, predefinedId }
+    this.labelAssociations = new Map(); // chatId -> Set<labelId>
+    
     // Media files tracking: messageId -> filePath
     this.mediaFiles = new Map();
     
@@ -334,6 +338,45 @@ class BaileysStore {
         const existing = this.groupMetadata.get(update.id);
         if (existing) {
           this.groupMetadata.set(update.id, { ...existing, ...update });
+        }
+      }
+    });
+
+    // Handle label events
+    ev.on('labels.edit', (label) => {
+      if (label.deleted) {
+        this.labels.delete(label.id);
+        // Remove associations for deleted label
+        for (const [chatId, labelSet] of this.labelAssociations.entries()) {
+          labelSet.delete(label.id);
+          if (labelSet.size === 0) this.labelAssociations.delete(chatId);
+        }
+      } else {
+        this.labels.set(label.id, {
+          id: label.id,
+          name: label.name,
+          color: label.color,
+          predefinedId: label.predefinedId || null
+        });
+      }
+    });
+
+    ev.on('labels.association', ({ association, type }) => {
+      if (!association) return;
+      const chatId = association.chatId;
+      const labelId = association.labelId;
+      if (!chatId || !labelId) return;
+
+      if (!this.labelAssociations.has(chatId)) {
+        this.labelAssociations.set(chatId, new Set());
+      }
+
+      if (type === 'add') {
+        this.labelAssociations.get(chatId).add(labelId);
+      } else if (type === 'remove') {
+        this.labelAssociations.get(chatId).delete(labelId);
+        if (this.labelAssociations.get(chatId).size === 0) {
+          this.labelAssociations.delete(chatId);
         }
       }
     });
@@ -686,7 +729,12 @@ class BaileysStore {
         ]),
         groupMetadata: Array.from(this.groupMetadata.entries()),
         profilePictures: Array.from(this.profilePictures.entries()),
-        lidMap: Array.from(this.lidMap.entries())
+        lidMap: Array.from(this.lidMap.entries()),
+        labels: Array.from(this.labels.entries()),
+        labelAssociations: Array.from(this.labelAssociations.entries()).map(([chatId, labelSet]) => [
+          chatId,
+          Array.from(labelSet)
+        ])
       };
       
       // Use safe serialization to avoid .enc or corrupted files
@@ -759,6 +807,14 @@ class BaileysStore {
       if (data.lidMap) {
         this.lidMap = new Map(data.lidMap);
       }
+      if (data.labels) {
+        this.labels = new Map(data.labels);
+      }
+      if (data.labelAssociations) {
+        this.labelAssociations = new Map(
+          data.labelAssociations.map(([chatId, labelIds]) => [chatId, new Set(labelIds)])
+        );
+      }
       
       // Reconstruct lidMap from contacts (collect first to avoid modifying map during iteration)
       const identityPairs = [];
@@ -818,6 +874,8 @@ class BaileysStore {
     this.profilePictures.clear();
     this.contactsCache.clear();
     this.mediaFiles.clear();
+    this.labels.clear();
+    this.labelAssociations.clear();
   }
 
   /**
@@ -834,8 +892,76 @@ class BaileysStore {
       contacts: this.contacts.size,
       messages: totalMessages,
       groups: this.groupMetadata.size,
-      mediaFiles: this.mediaFiles.size
+      mediaFiles: this.mediaFiles.size,
+      labels: this.labels.size
     };
+  }
+
+  // ==================== LABEL METHODS ====================
+
+  /**
+   * Get all labels
+   */
+  getLabels() {
+    return Array.from(this.labels.values());
+  }
+
+  /**
+   * Get label by ID
+   */
+  getLabelById(labelId) {
+    return this.labels.get(labelId) || null;
+  }
+
+  /**
+   * Get all labels for a specific chat
+   */
+  getLabelsByChat(chatId) {
+    const labelIds = this.labelAssociations.get(chatId);
+    if (!labelIds || labelIds.size === 0) return [];
+    return Array.from(labelIds)
+      .map(id => this.labels.get(id))
+      .filter(Boolean);
+  }
+
+  /**
+   * Get all chats that have a specific label
+   */
+  getChatsByLabel(labelId) {
+    const result = [];
+    for (const [chatId, labelSet] of this.labelAssociations.entries()) {
+      if (labelSet.has(labelId)) {
+        const overview = this.chatsOverview.get(chatId);
+        result.push({
+          chatId,
+          name: overview?.name || chatId.split('@')[0],
+          isGroup: chatId.endsWith('@g.us'),
+          profilePicture: overview?.profilePicture || null
+        });
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Manually add a label association (used when Baileys method is called)
+   */
+  addLabelAssociation(chatId, labelId) {
+    if (!this.labelAssociations.has(chatId)) {
+      this.labelAssociations.set(chatId, new Set());
+    }
+    this.labelAssociations.get(chatId).add(labelId);
+  }
+
+  /**
+   * Manually remove a label association
+   */
+  removeLabelAssociation(chatId, labelId) {
+    const labelSet = this.labelAssociations.get(chatId);
+    if (labelSet) {
+      labelSet.delete(labelId);
+      if (labelSet.size === 0) this.labelAssociations.delete(chatId);
+    }
   }
 
   /**

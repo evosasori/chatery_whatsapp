@@ -1,4 +1,4 @@
-﻿# 🚀 Chatery WhatsApp API
+# 🚀 Chatery WhatsApp API
 
 ![Chatery](https://sgp.cloud.appwrite.io/v1/storage/buckets/6941a5b70012d918c7aa/files/6941a69000028dec52d2/view?project=694019b0000abc694483&token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ0b2tlbklkIjoiNjk0MWE4NjRjZGNhZGUxOTZmNTMiLCJyZXNvdXJjZUlkIjoiNjk0MWE1YjcwMDEyZDkxOGM3YWE6Njk0MWE2OTAwMDAyOGRlYzUyZDIiLCJyZXNvdXJjZVR5cGUiOiJmaWxlcyIsInJlc291cmNlSW50ZXJuYWxJZCI6IjE0NTE6MSIsImlhdCI6MTc2NTkxMDYyOH0.6DyBMKwzA6x__pQZn3vICDLdBfo0mEUlyMVAc3qEnyo)
 A powerful WhatsApp API backend built with Express.js and Baileys library. Supports multi-session management, real-time WebSocket events, group management, and media handling.
@@ -40,7 +40,8 @@ A powerful WhatsApp API backend built with Express.js and Baileys library. Suppo
 
 - 📱 **Multi-Session Support** - Manage multiple WhatsApp accounts simultaneously
 - 🔌 **Real-time WebSocket** - Get instant notifications for messages, status updates, and more
-- 👥 **Group Management** - Create, manage, and control WhatsApp gada iklan gitu, kayak negiklankan service chatery di sumopodroups
+- 👥 **Group Management** - Create, manage, and control WhatsApp groups
+- 🏷️ **Chat Labels** - Label chats and messages for organization (WhatsApp Business)
 - 📨 **Send Messages** - Text, images, documents, locations, contacts, and more
 - ↩️ **Reply to Messages** - Reply/quote specific messages with replyTo parameter
 - 📊 **Poll Messages** - Send interactive polls with single or multiple choice
@@ -78,6 +79,7 @@ For complete and detailed documentation, please visit:
   - [Bulk Messaging](#bulk-messaging-background-jobs)
   - [Chat History](#chat-history)
   - [Group Management](#group-management)
+  - [Labels](#labels)
 - [WebSocket Events](#-websocket-events)
 - [Examples](#-examples)
 
@@ -1251,6 +1253,245 @@ POST /groups/revoke-invite
 {
   "sessionId": "mysession",
   "groupId": "123456789@g.us"
+}
+```
+
+---
+
+### Labels
+
+> 🏷️ **WhatsApp Business Feature**: Labels are available for WhatsApp Business accounts. Labels are created in the WhatsApp Business app, and you can manage label associations (assign/remove labels to chats and messages) via the API.
+
+#### Get All Labels
+```http
+POST /labels
+```
+
+**Body:**
+```json
+{
+  "sessionId": "mysession"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "labels": [
+      {
+        "id": "1",
+        "name": "New Customer",
+        "color": 0,
+        "predefinedId": null
+      },
+      {
+        "id": "2",
+        "name": "Pending Payment",
+        "color": 1,
+        "predefinedId": null
+      }
+    ],
+    "total": 2
+  }
+}
+```
+
+#### Get Label Info
+```http
+POST /labels/info
+```
+
+**Body:**
+```json
+{
+  "sessionId": "mysession",
+  "labelId": "1"
+}
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `sessionId` | string | Required. Session ID |
+| `labelId` | string | Required. Label ID |
+
+#### Add Label to Chat
+```http
+POST /labels/chat/add
+```
+
+**Body:**
+```json
+{
+  "sessionId": "mysession",
+  "chatId": "628123456789",
+  "labelId": "1"
+}
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `sessionId` | string | Required. Session ID |
+| `chatId` | string | Required. Phone number or group ID |
+| `labelId` | string | Required. Label ID to assign |
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Label added to chat",
+  "data": {
+    "chatId": "628123456789@s.whatsapp.net",
+    "labelId": "1"
+  }
+}
+```
+
+#### Remove Label from Chat
+```http
+POST /labels/chat/remove
+```
+
+**Body:**
+```json
+{
+  "sessionId": "mysession",
+  "chatId": "628123456789",
+  "labelId": "1"
+}
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `sessionId` | string | Required. Session ID |
+| `chatId` | string | Required. Phone number or group ID |
+| `labelId` | string | Required. Label ID to remove |
+
+#### Add Label to Message
+```http
+POST /labels/message/add
+```
+
+**Body:**
+```json
+{
+  "sessionId": "mysession",
+  "chatId": "628123456789",
+  "messageId": "3EB0B430A2B52B67D0",
+  "labelId": "2"
+}
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `sessionId` | string | Required. Session ID |
+| `chatId` | string | Required. Phone number or group ID |
+| `messageId` | string | Required. Message ID to label |
+| `labelId` | string | Required. Label ID to assign |
+
+#### Remove Label from Message
+```http
+POST /labels/message/remove
+```
+
+**Body:**
+```json
+{
+  "sessionId": "mysession",
+  "chatId": "628123456789",
+  "messageId": "3EB0B430A2B52B67D0",
+  "labelId": "2"
+}
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `sessionId` | string | Required. Session ID |
+| `chatId` | string | Required. Phone number or group ID |
+| `messageId` | string | Required. Message ID |
+| `labelId` | string | Required. Label ID to remove |
+
+#### Get Chats by Label
+```http
+POST /labels/chats
+```
+
+Get all chats that have been assigned a specific label.
+
+**Body:**
+```json
+{
+  "sessionId": "mysession",
+  "labelId": "1"
+}
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `sessionId` | string | Required. Session ID |
+| `labelId` | string | Required. Label ID to filter by |
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "label": {
+      "id": "1",
+      "name": "New Customer",
+      "color": 0,
+      "predefinedId": null
+    },
+    "chats": [
+      {
+        "chatId": "628123456789@s.whatsapp.net",
+        "name": "John Doe",
+        "isGroup": false,
+        "profilePicture": null
+      }
+    ],
+    "total": 1
+  }
+}
+```
+
+#### Get Labels by Chat
+```http
+POST /labels/by-chat
+```
+
+Get all labels assigned to a specific chat.
+
+**Body:**
+```json
+{
+  "sessionId": "mysession",
+  "chatId": "628123456789"
+}
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `sessionId` | string | Required. Session ID |
+| `chatId` | string | Required. Phone number or group ID |
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "chatId": "628123456789@s.whatsapp.net",
+    "labels": [
+      {
+        "id": "1",
+        "name": "New Customer",
+        "color": 0,
+        "predefinedId": null
+      }
+    ],
+    "total": 1
+  }
 }
 ```
 
